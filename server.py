@@ -107,8 +107,8 @@ def _parseTypeValue(value):
   """ Utility function to get queryParameters type using a naive approach
   
     If paramter is a boolean like true or False function return the equivalent boolean
-    If input can be converte to a number base 10 , return number
-    else is a simple string and i need to filter by it
+    If value can be converted to a number base 10 , return number
+    If is a simple string and dont need conversio processing happen later
   
   """
 
@@ -130,6 +130,53 @@ def _parseTypeValue(value):
     return result
 
 
+def _getFieldValues(attributes,fields):
+
+  """ Fields is a list of fields separeted by ,
+      use to fill selection values
+  """
+
+  selectionFields = fields.split(',')
+  validFields = []
+  invalidFields = []
+
+  print("Debugging selection fields")
+  print(fields)
+  print(selectionFields)
+
+  for field in selectionFields:
+
+    if field in attributes:
+      validFields.append(field)
+    else:
+      invalidFields.append((field,'invalid Field'))
+
+  return (validFields,invalidFields)
+
+
+def _getSortValues(attributes, field):
+ 
+  sortFields = field.split(',')
+  
+  validFields = []
+  invalidFields = []
+
+  for data in sortFields:
+
+    operator = data[0]
+    field = data[1:]
+
+    if operator not in ['+','-']:
+      invalidFields.append((data,'operatorError'))
+      continue
+
+    if field in attributes:
+      validFields.append((operator,field))
+    else:
+      invalidFields.append((field,'invalid field'))
+
+  return (validFields,invalidFields)
+
 # helper function // Maybe create a function named queryManager
 def _filterResourceFields(resourceFields, Resource):
   """ Return list of tuples with querystring parameters which are defined in ou resource
@@ -141,7 +188,50 @@ def _filterResourceFields(resourceFields, Resource):
   """
   attributes = Resource._meta.fields.keys()
 
-  return [fields for fields in resourceFields if fields[0] in attributes]
+  queryFields = {
+    'selectionFields': "",
+    'sortFields': "",
+    'searchFields': "",
+  }
+
+  errorQueryFields = {
+    'errorSelection': [],
+    'errorSort': [],
+    'searchSort': [],
+  }
+
+  searchValues = []
+
+  fieldCount = 0
+  sortCount = 0
+
+  ## TODO search is are more than 2 fields
+  for fields in resourceFields:
+
+    if fields[0] == "fields":
+      fieldCount +=1
+
+      if fieldCount < 2:
+        queryFields['selectionFields'], errorQueryFields['errorSelection'] = _getFieldValues(attributes, fields[1])
+      else:
+        errorQueryFields['errorSelection'].append(('fields','More than one fields attribute on api'))
+
+    elif fields[0] == "sort":
+      sortCount +=1
+
+      if sortCount < 2:
+        queryFields['sortFields'], errorQueryFields['errorSort'] = _getSortValues(attributes, fields[1])
+      else:
+        errorQueryFields['errorSort'].append(('sort', 'More than one fields attribute on api'))
+
+    else:
+      searchValues.append(fields)
+
+  queryFields['searchFields'] = searchValues
+  print("Query fields")
+  print(queryFields)
+  return (queryFields,errorQueryFields)
+  #return [fields for fields in resourceFields if fields[0] in attributes]
 
 
 def _prepareQueryParameters(queryParameters, Resource):
@@ -149,7 +239,7 @@ def _prepareQueryParameters(queryParameters, Resource):
       and another with filters to get data from resource endpoint
   """
   systemParams = ['pageSize', 'continuationToken', 'limit']
-
+  
   systemValues = []
   filterValues = []
 
@@ -158,42 +248,83 @@ def _prepareQueryParameters(queryParameters, Resource):
     if parameter in systemParams:
       systemValues.append(( parameter, _parseTypeValue(queryParameters[parameter]) ))
     else:
-      filterValues.append(
-          ( parameter, _parseTypeValue(queryParameters[parameter]) )
-      )
+      filterValues.append(( parameter, _parseTypeValue(queryParameters[parameter]) ))
 
-  filterValues = _filterResourceFields(filterValues, Resource)
-  return (filterValues, systemValues)
+  filterValues, errorValues = _filterResourceFields(filterValues, Resource)
+
+  return (filterValues, systemValues, errorValues)
 
 def _getQueryExpression(filterValues, Resource):
 
-  
   exp = [(getattr(Resource, attribute) == value) for attribute,value in filterValues ]
   return reduce(operator.and_, exp)
+
+def _getQuerySelectionExpression(selectionValues, Resource):
+
+  exp = [ getattr(Resource, attribute) for attribute in selectionValues ]
+  return exp
+
+def _getQuerySortExpression(sortValues, Resource):
+
+  sortExpression = []
+
+  print("Printing sort fields")
+  print(sortExpression)
+
+  for operator, attribute in sortValues:
+    if operator == "+":
+      sortExpression.append(getattr(Resource, attribute).asc())
+    else:
+      sortExpression.append(getattr(Resource, attribute).desc())
+
+  return sortExpression
+
   
 def computeRequestQueries(Resource,queryParameters):
 
   """ function computes query expression to get record base on api request """
 
-  expressionFilter  = ""
-  expressionSystem = ""
+  expressionData = {
+    'search': "",
+    'sort': "",
+    'selection': "",
+    'system': "",
+  }
   
-  filterValues, systemValues = _prepareQueryParameters(queryParameters, Resource)
-
+  filterValues, systemValues , errorValues = _prepareQueryParameters(queryParameters, Resource)
+  
   if filterValues:
-    expressionFilter = _getQueryExpression(filterValues, Resource)
+
+    if filterValues.get('searchFields', False):
+
+      #expressionFilter = _getQueryExpression(filterValues['searchFields'], Resource)
+      expressionData['search'] = _getQueryExpression(filterValues['searchFields'], Resource)
+      
+    if filterValues.get('selectionFields',False):
+
+      expressionSelection = _getQuerySelectionExpression(filterValues['selectionFields'], Resource)
+      expressionData['selection'] = (expressionSelection, filterValues['selectionFields'])
+
+    if filterValues.get('sortFields',False) :
+      expressionData['sort'] = _getQuerySortExpression(filterValues['sortFields'], Resource)
+      # expressionSort = _getQuerySortExpression(filterValues['sortFields'], Resource)
 
   #####TODO: Implement maybe paginationClass to get this data
   if systemValues:
-    expressionSystem = ""
+    expressionData["system"] = ""
+    # expressionSystem = ""
 
-  return (expressionFilter,expressionSystem)
+  if errorValues:
+    pass
+    ## Check if some error ocurred Create Error Object
+
+  return expressionData
 
 
 def _get_query_parameters(query):
 
   filters = [ parameter for parameter in query if parameter not in ['pageSize','continuationToken','limit']]
-  print(filters)
+  
   return filters
 
 @hook('before_request')
@@ -223,9 +354,10 @@ def get_all_notes(id=None):
 
   response.headers['Content-Type'] = 'application/json'
 
+  
   ## TODO : Check documentation to find another way, maybe use keys instead of len
   if len(request.query) > 0:
-    filterQueries, systemQueries = computeRequestQueries(Note,request.query.decode())
+    queries = computeRequestQueries(Note,request.query.decode())
 
   if not id:
 
@@ -239,13 +371,23 @@ def get_all_notes(id=None):
        notes.page(bla bla bla)
 
     """
- 
-    if filterQueries:
-      notes = Note.select().where(filterQueries)
-    else:
-      notes = Note.select()
-
+    
     schema = NoteSchema(many=True)
+
+    notes = Note()
+    if queries.get('selection',False):
+      notes = Note.select(*queries['selection'][0])
+      schema.only = queries['selection'][1]
+    else:
+      notes = notes.select()
+
+    if queries.get('sort', False):
+      notes = notes.order_by(*queries['sort'])
+
+    if queries.get('search',False):
+      notes = notes.where(queries['search'])
+    
+    # schema = NoteSchema(many=True)
 
   else:
     notes = Note.get(Note.id == id)
@@ -338,7 +480,7 @@ def load_data(db_handler):
           "active": False,
           "title": "La vida de los numeros",
           "content": "Lorem ipsum y los numeros de la muerte",
-          "edited_at": "2019-10-24",
+          "edited_at": "2019-10-25",
           "created_by": "Jesenia",
           "created_at": "2019-10-24"
       })
