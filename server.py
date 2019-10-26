@@ -22,15 +22,22 @@ class BaseModel(pw.Model):
     database = sql_database
 
 class Note(BaseModel):
-  
+
   title = pw.CharField()
   content = pw.CharField()
   created_by = pw.CharField()
   edited_at = pw.DateField()
   created_at = pw.DateField()
   active = pw.BooleanField()
-  #uuid = pw.UUIDField(unique=True)
 
+  def __init__(self,*args,**kwargs):
+
+    super().__init__(self,*args,**kwargs)
+    self.links = ""
+  
+  def setLink(self,rootPath,id):
+    
+    self.links = rootPath + '/' + id
 
 class ErrorBase():
 
@@ -64,12 +71,14 @@ class ErrorObject(ErrorBase):
 
 class NoteSchema(Schema):
 
+  
   title = fields.Str()
   content = fields.Str()
   created_by = fields.Str()
   edited_at = fields.Date()
   created_at = fields.Date()
   active = fields.Boolean()
+  links = fields.Str(dump_only=True)
 
   @post_load
   def create_note(self, data,**kwargs):
@@ -82,8 +91,24 @@ class NoteSchema(Schema):
     
     return Note(**data)
 
+
+  @pre_dump(pass_many=True)
+  def addLink(self,data,many,**kwargs):
+    print(data)
+    for record in data:
+      record.setLink(_getResourcePath(request.urlparts[:3]),str(record.id))
+    return data
+
+    
+
   @post_dump(pass_many=True)
   def create_envelope(self,data,many,**kwargs):
+    # print(data)
+    # print("Printing kwargs")
+    # print(**kwargs)
+    
+    print(many)
+    print(kwargs)
     return({'data': data})
 
 
@@ -228,10 +253,9 @@ def _filterResourceFields(resourceFields, Resource):
       searchValues.append(fields)
 
   queryFields['searchFields'] = searchValues
-  print("Query fields")
-  print(queryFields)
+  
   return (queryFields,errorQueryFields)
-  #return [fields for fields in resourceFields if fields[0] in attributes]
+  
 
 
 def _prepareQueryParameters(queryParameters, Resource):
@@ -261,7 +285,13 @@ def _getQueryExpression(filterValues, Resource):
 
 def _getQuerySelectionExpression(selectionValues, Resource):
 
+  
   exp = [ getattr(Resource, attribute) for attribute in selectionValues ]
+
+  if 'id' not in selectionValues:
+    #append default _id for serializer use
+    exp.append( getattr(Resource, 'id'))
+
   return exp
 
 def _getQuerySortExpression(sortValues, Resource):
@@ -282,7 +312,9 @@ def _getQuerySortExpression(sortValues, Resource):
   
 def computeRequestQueries(Resource,queryParameters):
 
-  """ function computes query expression to get record base on api request """
+  """ 
+    Function taht computes a valid queryExpression  to get records with peewee ORM
+  """
 
   expressionData = {
     'search': "",
@@ -297,7 +329,6 @@ def computeRequestQueries(Resource,queryParameters):
 
     if filterValues.get('searchFields', False):
 
-      #expressionFilter = _getQueryExpression(filterValues['searchFields'], Resource)
       expressionData['search'] = _getQueryExpression(filterValues['searchFields'], Resource)
       
     if filterValues.get('selectionFields',False):
@@ -307,7 +338,7 @@ def computeRequestQueries(Resource,queryParameters):
 
     if filterValues.get('sortFields',False) :
       expressionData['sort'] = _getQuerySortExpression(filterValues['sortFields'], Resource)
-      # expressionSort = _getQuerySortExpression(filterValues['sortFields'], Resource)
+      
 
   #####TODO: Implement maybe paginationClass to get this data
   if systemValues:
@@ -348,36 +379,47 @@ def _get_attr(object,filters):
 
   return exp2
 
+
+def _addSerializerParameters(systemValues, extraParameters,resourceSchema=None):
+
+  #TODO some validation on extraPArameter to Show if exist on schema
+  # _checkSchemaParameters(extraParameter,resourceSchema)
+  if isinstance(extraParameters,type([])):
+    return tuple(systemValues + extraParameters)
+    
+  else:
+    return tuple(systemValues + [extraParameters])
+
+def _getResourcePath(urlparts):
+
+  "Get urlparts : scheme, host, path"
+  return urlparts[0] + '://' + urlparts[1] + urlparts[2]
+
 @get('/api/v1/notes')
 @get('/api/v1/notes/<id:int>')
 def get_all_notes(id=None):
 
   response.headers['Content-Type'] = 'application/json'
+  print(_getResourcePath(request.urlparts[:3]))
 
-  
+
   ## TODO : Check documentation to find another way, maybe use keys instead of len
   if len(request.query) > 0:
     queries = computeRequestQueries(Note,request.query.decode())
-
+  
   if not id:
 
-    """maybe something like:
-
-    if selectQueries:
-       notes = Note.select(selectQueries)
-     if filterQueries:
-       notes.where(filterQueries)
-     if systemQueries:
-       notes.page(bla bla bla)
-
-    """
-    
     schema = NoteSchema(many=True)
 
     notes = Note()
     if queries.get('selection',False):
       notes = Note.select(*queries['selection'][0])
-      schema.only = queries['selection'][1]
+      
+      showOnSerializer = _addSerializerParameters(queries['selection'][1], 'links')
+      
+      schema.only = showOnSerializer
+      #schema.only = queries['selection'][1] + ['links']
+
     else:
       notes = notes.select()
 
@@ -391,9 +433,10 @@ def get_all_notes(id=None):
 
   else:
     notes = Note.get(Note.id == id)
+
     schema = NoteSchema()
 
-  jsonNotes = schema.dumps(notes)
+  jsonNotes = schema.dumps(notes, {"requestData": "/api/v1/notes/id"})
 
   return jsonNotes.data
 
