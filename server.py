@@ -5,358 +5,16 @@ import os
 import json
 import operator
 
-
 from bottle import get, post, run, static_file, route, template, hook, request, response
-from marshmallow import Schema, fields, pprint, post_load, pre_dump, post_dump
 from datetime import date, datetime
-from functools import reduce
 
+### My own modules
+from database.database import sql_database
+from serializers.noteSerializer import NoteSchema
+from models.note import Note
+from utils.helpers import addSerializerParameters, getResourcePath
+from utils.querycomposer import QueryComposer
 
-### Database and model Section
-
-sql_database = pw.SqliteDatabase('notes.db')
-
-class BaseModel(pw.Model):
-  'Set base model where we especify which database are we gonna use'
-  class Meta:
-    database = sql_database
-
-class Note(BaseModel):
-
-  title = pw.CharField()
-  content = pw.CharField()
-  created_by = pw.CharField()
-  edited_at = pw.DateField()
-  created_at = pw.DateField()
-  active = pw.BooleanField()
-
-  def __init__(self,*args,**kwargs):
-
-    super().__init__(self,*args,**kwargs)
-    self.links = ""
-  
-  def setLink(self,rootPath,id):
-    
-    self.links = rootPath + '/' + id
-
-class ErrorBase():
-
-  _error_dict = {
-
-    '1': "Bad query arguments for resource",
-    '2': "Cannot find any expected values",
-    '3': "Bad pagination offset",
-    '4': "Cannot filter queries when searching a record by id",
-
-  }
-
-class ErrorObject(ErrorBase):
-
-  def __init__(self,**kwargs):
-
-     allowed_keys = set(['_status', '_title', '_source','_detail'])
-     self.__dict__.update((key, False) for key in allowed_keys)
-     self.__dict__.update((key, value) for key,value in kwargs.items() if key in allowed_keys )
-
-  def setSourceError(self, originURI):
-
-    self._source = originURI
-
-  def getErrorCode(self,error):
-
-    return self._error_dict[error]
-
-    
-## Serializers definition
-
-class NoteSchema(Schema):
-
-  
-  title = fields.Str()
-  content = fields.Str()
-  created_by = fields.Str()
-  edited_at = fields.Date()
-  created_at = fields.Date()
-  active = fields.Boolean()
-  links = fields.Str(dump_only=True)
-
-  @post_load
-  def create_note(self, data,**kwargs):
-
-    data.update({
-      'created_at': datetime.now().date(),
-      'edited_at': datetime.now().date(),
-      'created_by': "Cristhian"
-    })
-    
-    return Note(**data)
-
-
-  @pre_dump(pass_many=True)
-  def addLink(self,data,many,**kwargs):
-    print(data)
-    for record in data:
-      record.setLink(_getResourcePath(request.urlparts[:3]),str(record.id))
-    return data
-
-    
-
-  @post_dump(pass_many=True)
-  def create_envelope(self,data,many,**kwargs):
-    # print(data)
-    # print("Printing kwargs")
-    # print(**kwargs)
-    
-    print(many)
-    print(kwargs)
-    return({'data': data})
-
-
-class ErrorSchema(Schema):
-
-  status = fields.Str()
-  title = fields.Str()
-  source = fields.Str()
-  detail = fields.Str()
-
-  @post_dump(pass_many=True)
-  def create_error(self,data,many,**kwargs):
-
-    """ Function to wrap my error objects """
-    return({'error': data })
-
-
-
-def _parseTypeValue(value):
-
-  """ Utility function to get queryParameters type using a naive approach
-  
-    If paramter is a boolean like true or False function return the equivalent boolean
-    If value can be converted to a number base 10 , return number
-    If is a simple string and dont need conversio processing happen later
-  
-  """
-
-  if value == "True":
-    return True
-  
-  elif value == "False":
-    return False
-
-  else:
-
-    result = ""
-
-    try:
-      result = int(value)
-    except ValueError:
-      result = value
-
-    return result
-
-
-def _getFieldValues(attributes,fields):
-
-  """ Fields is a list of fields separeted by ,
-      use to fill selection values
-  """
-
-  selectionFields = fields.split(',')
-  validFields = []
-  invalidFields = []
-
-  print("Debugging selection fields")
-  print(fields)
-  print(selectionFields)
-
-  for field in selectionFields:
-
-    if field in attributes:
-      validFields.append(field)
-    else:
-      invalidFields.append((field,'invalid Field'))
-
-  return (validFields,invalidFields)
-
-
-def _getSortValues(attributes, field):
- 
-  sortFields = field.split(',')
-  
-  validFields = []
-  invalidFields = []
-
-  for data in sortFields:
-
-    operator = data[0]
-    field = data[1:]
-
-    if operator not in ['+','-']:
-      invalidFields.append((data,'operatorError'))
-      continue
-
-    if field in attributes:
-      validFields.append((operator,field))
-    else:
-      invalidFields.append((field,'invalid field'))
-
-  return (validFields,invalidFields)
-
-# helper function // Maybe create a function named queryManager
-def _filterResourceFields(resourceFields, Resource):
-  """ Return list of tuples with querystring parameters which are defined in ou resource
-      
-      input : Resource object 
-      input : [(parameter, value), ......]
-      output : [(parameter, value), ......]
-
-  """
-  attributes = Resource._meta.fields.keys()
-
-  queryFields = {
-    'selectionFields': "",
-    'sortFields': "",
-    'searchFields': "",
-  }
-
-  errorQueryFields = {
-    'errorSelection': [],
-    'errorSort': [],
-    'searchSort': [],
-  }
-
-  searchValues = []
-
-  fieldCount = 0
-  sortCount = 0
-
-  ## TODO search is are more than 2 fields
-  for fields in resourceFields:
-
-    if fields[0] == "fields":
-      fieldCount +=1
-
-      if fieldCount < 2:
-        queryFields['selectionFields'], errorQueryFields['errorSelection'] = _getFieldValues(attributes, fields[1])
-      else:
-        errorQueryFields['errorSelection'].append(('fields','More than one fields attribute on api'))
-
-    elif fields[0] == "sort":
-      sortCount +=1
-
-      if sortCount < 2:
-        queryFields['sortFields'], errorQueryFields['errorSort'] = _getSortValues(attributes, fields[1])
-      else:
-        errorQueryFields['errorSort'].append(('sort', 'More than one fields attribute on api'))
-
-    else:
-      searchValues.append(fields)
-
-  queryFields['searchFields'] = searchValues
-  
-  return (queryFields,errorQueryFields)
-  
-
-
-def _prepareQueryParameters(queryParameters, Resource):
-  """ Returns a tuple with  a list of queryString variables and values for the system (pagination, metadata, etc)
-      and another with filters to get data from resource endpoint
-  """
-  systemParams = ['pageSize', 'continuationToken', 'limit']
-  
-  systemValues = []
-  filterValues = []
-
-  for parameter in queryParameters:
-
-    if parameter in systemParams:
-      systemValues.append(( parameter, _parseTypeValue(queryParameters[parameter]) ))
-    else:
-      filterValues.append(( parameter, _parseTypeValue(queryParameters[parameter]) ))
-
-  filterValues, errorValues = _filterResourceFields(filterValues, Resource)
-
-  return (filterValues, systemValues, errorValues)
-
-def _getQueryExpression(filterValues, Resource):
-
-  exp = [(getattr(Resource, attribute) == value) for attribute,value in filterValues ]
-  return reduce(operator.and_, exp)
-
-def _getQuerySelectionExpression(selectionValues, Resource):
-
-  
-  exp = [ getattr(Resource, attribute) for attribute in selectionValues ]
-
-  if 'id' not in selectionValues:
-    #append default _id for serializer use
-    exp.append( getattr(Resource, 'id'))
-
-  return exp
-
-def _getQuerySortExpression(sortValues, Resource):
-
-  sortExpression = []
-
-  print("Printing sort fields")
-  print(sortExpression)
-
-  for operator, attribute in sortValues:
-    if operator == "+":
-      sortExpression.append(getattr(Resource, attribute).asc())
-    else:
-      sortExpression.append(getattr(Resource, attribute).desc())
-
-  return sortExpression
-
-  
-def computeRequestQueries(Resource,queryParameters):
-
-  """ 
-    Function taht computes a valid queryExpression  to get records with peewee ORM
-  """
-
-  expressionData = {
-    'search': "",
-    'sort': "",
-    'selection': "",
-    'system': "",
-  }
-  
-  filterValues, systemValues , errorValues = _prepareQueryParameters(queryParameters, Resource)
-  
-  if filterValues:
-
-    if filterValues.get('searchFields', False):
-
-      expressionData['search'] = _getQueryExpression(filterValues['searchFields'], Resource)
-      
-    if filterValues.get('selectionFields',False):
-
-      expressionSelection = _getQuerySelectionExpression(filterValues['selectionFields'], Resource)
-      expressionData['selection'] = (expressionSelection, filterValues['selectionFields'])
-
-    if filterValues.get('sortFields',False) :
-      expressionData['sort'] = _getQuerySortExpression(filterValues['sortFields'], Resource)
-      
-
-  #####TODO: Implement maybe paginationClass to get this data
-  if systemValues:
-    expressionData["system"] = ""
-    # expressionSystem = ""
-
-  if errorValues:
-    pass
-    ## Check if some error ocurred Create Error Object
-
-  return expressionData
-
-
-def _get_query_parameters(query):
-
-  filters = [ parameter for parameter in query if parameter not in ['pageSize','continuationToken','limit']]
-  
-  return filters
 
 @hook('before_request')
 def db_connect():
@@ -370,43 +28,17 @@ def db_close():
 
     return response
 
-def _get_attr(object,filters):
-
-
-  exp = [ (getattr(object,f) == v ) for f,v in zip(filters,[False])]
-  exp2 = reduce(operator.and_,exp)
-  print(exp2)
-
-  return exp2
-
-
-def _addSerializerParameters(systemValues, extraParameters,resourceSchema=None):
-
-  #TODO some validation on extraPArameter to Show if exist on schema
-  # _checkSchemaParameters(extraParameter,resourceSchema)
-  if isinstance(extraParameters,type([])):
-    return tuple(systemValues + extraParameters)
-    
-  else:
-    return tuple(systemValues + [extraParameters])
-
-def _getResourcePath(urlparts):
-
-  "Get urlparts : scheme, host, path"
-  return urlparts[0] + '://' + urlparts[1] + urlparts[2]
-
 @get('/api/v1/notes')
 @get('/api/v1/notes/<id:int>')
 def get_all_notes(id=None):
 
   response.headers['Content-Type'] = 'application/json'
-  print(_getResourcePath(request.urlparts[:3]))
-
-
+  
   ## TODO : Check documentation to find another way, maybe use keys instead of len
   if len(request.query) > 0:
-    queries = computeRequestQueries(Note,request.query.decode())
-  
+    
+    queries = QueryComposer.computeRequestQueries(Note,request.query.decode())
+
   if not id:
 
     schema = NoteSchema(many=True)
@@ -415,7 +47,7 @@ def get_all_notes(id=None):
     if queries.get('selection',False):
       notes = Note.select(*queries['selection'][0])
       
-      showOnSerializer = _addSerializerParameters(queries['selection'][1], 'links')
+      showOnSerializer = addSerializerParameters(queries['selection'][1], 'links')
       
       schema.only = showOnSerializer
       #schema.only = queries['selection'][1] + ['links']
