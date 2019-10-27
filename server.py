@@ -4,20 +4,28 @@ import peewee as pw
 import os
 import json
 import operator
+import bcrypt
 
-from bottle import get, post, run, static_file, route, template, hook, request, response
-from datetime import date, datetime
+
+from bottle import get, post, run, static_file, route, template, hook, request, response, abort
+from datetime import date, datetime , timedelta
 
 ### My own modules
 from database.database import sql_database
 from serializers.noteSerializer import NoteSchema
 from serializers.linkSerializer import LinkSchema
+from serializers.userSerializer import UserSchema
 from models.note import Note
 from models.links import Links
+from models.user import User
 from utils.helpers import addSerializerParameters, getResourcePath
 from utils.querycomposer import QueryComposer
 
+import jwt
 
+JWT_SECRET = 'secret'
+JWT_ALGORITHM = 'HS256'
+JWT_EXP_DELTA_SECONDS = 3600
 
 @hook('before_request')
 def db_connect():
@@ -198,6 +206,162 @@ def post_notes():
 
   return jsonNotes.data
 
+@post('/api/v1/register')
+def registerUser():
+
+  userParams = request.json
+  if userParams:
+
+    password = userParams.get('password', False)
+    email = userParams.get('email',False)
+    name = userParams.get('name',False)
+
+    if not password or not email or not name:
+      response.status = 400
+      return
+
+    else:
+      
+      password= password.encode('utf-8')
+      hashed = bcrypt.hashpw(password, bcrypt.gensalt())
+      
+      userCount = User.select().where(User.email == email).count()
+
+      if userCount > 0:
+
+        response.status = 402
+        return 
+
+      else:
+
+        User(name=name,email=email,password=hashed).save()
+        response.status = 201
+        return 
+
+@post('/api/v1/login')
+def log_user():
+
+  userData = request.json
+
+  email = userData.get('email',False)
+  password = userData.get('password',False)
+
+  if not email or not password:
+
+    response.status = 400
+    ### maybe un raise ValueError
+
+  else:
+
+    try:
+      query = (User.select().where(User.email == email))
+      user = query.get()
+
+
+    except pw.DoesNotExist:
+      
+      response.status = 400
+      return
+
+    if user:
+      password = password.encode('utf-8')
+      if bcrypt.checkpw(password, user.password):
+
+        print("I dit it the user is authenticated")
+
+        exp = datetime.utcnow() + timedelta(seconds=JWT_EXP_DELTA_SECONDS)
+        payload = {
+          'user_id': user.id,
+          'exp': exp
+        }
+
+        jwtToken = jwt.encode(payload, JWT_SECRET, JWT_ALGORITHM)
+
+        if jwtToken:
+          user.update({'tokenExpiration': exp , 'activeToken': True }).execute()
+        
+          response.status = 200
+          return {'token': jwtToken.decode('utf-8')}
+
+        else:
+
+          response.status = 403
+          return {'error': "Error generating active token"}
+
+      else:
+
+        response.status = 404
+        print("Invalid credentials")
+        return
+
+    else :
+      response.status = 400
+      return {"error": "Not valid user"}
+
+
+
+@get('/api/v1/users')
+def get_all_users():
+
+  print(request.headers.get("Authorization"))
+  
+  users = User.select()
+
+  userSchema = UserSchema(many=True)
+  jsonUser = userSchema.dumps(User)
+
+  return jsonUser.data
+
+
+def getToken(request):
+
+  jwtToken = request.headers.get("Authorization", False)
+  return jwtToken
+  
+
+def auth_required(fn):
+  print("estoy entrando en la funcion decorador")
+  def decorated(*args, **kwargs):
+
+    jwtToken = getToken(request)
+
+    if jwtToken:
+
+      headerParts = jwtToken.split()
+
+      try:
+        token = jwt.decode(headerParts[1], JWT_SECRET)
+      except jwt.ExpiredSignature:
+        abort(401, {'code': 'token_expired',
+                    'description': 'token is expired'})
+      except jwt.DecodeError:
+        abort(401, {'code': 'token_invalid', 'description': "Some message "})
+
+    else:
+      abort(403, {'code': "Not token find on header"})
+    print("Previo a entrar en la funcion real")
+    return fn(*args, **kwargs)
+
+  return decorated
+
+
+@get("/api/v1/profile")
+@auth_required
+def get_profile():
+
+  usertoken = getToken(request)
+  if usertoken:
+
+    parts = usertoken.split()
+    jwtT = jwt.decode(parts[1],JWT_SECRET)
+
+    print(jwtT)
+    uid = jwtT['user_id']
+    print(uid)
+
+  return
+
+
 
 # Start your code here, good luck (: ...
 def set_initial_data(db_handler, tables):
@@ -254,12 +418,15 @@ def load_data(db_handler):
 
   Note.insert_many(new_notes).execute()
 
+  User(name="Cristhian", email="test@gmail.com",
+       password=b'$2b$12$U/QjtHt/j0xRT4r8Hx3fOe93EssM6M0iiUaQJOrTd64RXbxvhw6Ii').save()
+
 if __name__ == "__main__":
   
   print("Removing database")
   os.remove('notes.db')
 
-  set_initial_data(sql_database, [Note])
+  set_initial_data(sql_database, [Note,User])
   
   run( reloader=True, host='localhost', port=8000)
 

@@ -2,3 +2,6 @@ bottle==0.12.13
 marshmallow==2.13.5
 peewee==3.11.2
 PyJWT==1.5.2
+bcrypt==3.1.7
+httpie-jwt-auth==0.3.0
+httpie==1.0.3

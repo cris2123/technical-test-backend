@@ -5,11 +5,8 @@ class User(BaseModel):
 
   name = pw.CharField()
   email = pw.CharField()
-  password = pw.CharField()
-  token = pw.Charfield()
-  tokenExpiration = pw.DateTimeField()
+  password = pw.BitField()
+  activeToken = pw.BooleanField(null = True)
+  tokenExpiration = pw.DateTimeField(null = True)
   
-
-  def setLink(self, rootPath, id):
-
-    self.links = rootPath + '/' + id
+  
