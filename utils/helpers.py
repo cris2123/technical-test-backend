@@ -12,3 +12,8 @@ def addSerializerParameters(systemValues, extraParameters, resourceSchema=None):
 def getResourcePath(urlparts):
   "Get urlparts : scheme, host, path"
   return urlparts[0] + '://' + urlparts[1] + urlparts[2]
+
+def getCompleteApiCall(url):
+
+  return url.replace("%2C",',')
+  

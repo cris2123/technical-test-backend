@@ -3,6 +3,10 @@ from datetime import date, datetime
 from functools import reduce
 import operator
 
+from models.links import Links
+from utils.helpers import getCompleteApiCall
+from bottle import request
+
 
 class Singleton(type):
     _instances = {}
@@ -51,10 +55,6 @@ class QueryComposer(metaclass=Singleton):
     selectionFields = fields.split(',')
     validFields = []
     invalidFields = []
-
-    print("Debugging selection fields")
-    print(fields)
-    print(selectionFields)
 
     for field in selectionFields:
 
@@ -110,8 +110,8 @@ class QueryComposer(metaclass=Singleton):
 
     errorQueryFields = {
         'errorSelection': [],
+        'errorFields': [],
         'errorSort': [],
-        'searchSort': [],
     }
 
     searchValues = []
@@ -142,19 +142,123 @@ class QueryComposer(metaclass=Singleton):
           errorQueryFields['errorSort'].append(
               ('sort', 'More than one fields attribute on api'))
 
-      else:
+      elif fields[0] in attributes:
         searchValues.append(fields)
+
+      else:
+        errorQueryFields['errorFields'].append((fields[0],"Field not in resource"))
 
     queryFields['searchFields'] = searchValues
 
     return (queryFields, errorQueryFields)
 
   @staticmethod
+  def _systemResourceFields(resourceFields, Resource):
+
+    pageCount = 0
+    continueTokenCount = 0
+
+    invalidFields = []
+
+    for field in resourceFields:
+
+      if field[0] == "pagesize":
+        pageCount +=1
+        if pageCount < 2:
+          size = int(field[1])
+
+        else:
+          invalidFields.append((field[0],"Is repeated multiple times in request"))
+
+      elif field[0] == "continuetoken":
+        continueTokenCount +=1
+
+        if continueTokenCount < 2:
+          continuetoken = int(field[1])
+
+        else:
+          invalidFields.append((field[0], "Is repeated multiple times in request"))
+
+    if not continueTokenCount:
+
+      continuetoken = 1
+
+    if not pageCount:
+
+      size = 5
+    
+  
+    pagination = {
+
+      'pagesize': size,
+      'page': continuetoken,
+      
+    }
+
+    return (pagination, invalidFields)
+
+  
+
+    # invalidFields = []
+
+    # for field in resourceFields:
+
+    #   if field[0] == "pagesize":
+    #     pageCount +=1
+    #     if pageCount < 2:
+    #       size = int(field[1])
+    #     else:
+    #       invalidFields.append((field[0],"Is repeated multiple times in request"))
+
+    #   if field[0] == "continuetoken":
+    #     continueTokenCount +=1
+
+    #     if continueTokenCount <2:
+    #       continuetoken = int(field[1])
+    #       if continuetoken > 1:
+    #         previous = continueTokenCount-1
+    #       else:
+    #         previous = 0
+          
+    #       forward = continuetoken+1
+
+    # if continueTokenCount == 0:
+
+    #   continuetoken = 1
+    #   forward = continuetoken+1
+    #   previous = 0
+
+    # tokenValue = request.query.decode().get('continuetoken')
+
+    # ## All URLS
+    # if tokenValue:
+
+    #   currentURL = getCompleteApiCall(request.url)
+
+    #   if previous != 0:
+    #     value = request.query.decode()['continuetoken']
+    #     previousURL = getCompleteApiCall(request.url).replace('continuetoken='+ value ,'continuetoken='+ str(previous))
+
+
+    #   value = request.query.decode()['continuetoken']
+    #   nextURL = getCompleteApiCall(request.url).replace('continuetoken=' + value, 'continuetoken='+ str())
+
+    # else:
+    #   pass
+
+
+
+
+    # return link
+
+    
+
+  @staticmethod
   def _prepareQueryParameters(queryParameters, Resource):
     """ Returns a tuple with  a list of queryString variables and values for the system (pagination, metadata, etc)
         and another with filters to get data from resource endpoint
     """
-    systemParams = ['pageSize', 'continuationToken', 'limit']
+    systemParams = ['pagesize', 'continuetoken', 'limit']
 
     systemValues = []
     filterValues = []
@@ -171,7 +275,12 @@ class QueryComposer(metaclass=Singleton):
     filterValues, errorValues = QueryComposer._filterResourceFields(
         filterValues, Resource)
 
-    return (filterValues, systemValues, errorValues)
+    
+    pagination, errorPagination = QueryComposer._systemResourceFields(systemValues,Resource)
+
+    ## Get all error message in single dict
+    errorValues['errorPagination'] = errorPagination
+    return (filterValues, pagination, errorValues)
 
   @staticmethod
   def _getQueryExpression(filterValues, Resource):
@@ -243,9 +352,9 @@ class QueryComposer(metaclass=Singleton):
 
     #####TODO: Implement maybe paginationClass to get this data
     if systemValues:
-      expressionData["system"] = ""
-      # expressionSystem = ""
-
+      print("Entre aqui en system values")
+      expressionData["pagination"] = (systemValues['page'], systemValues['pagesize'])
+      
     if errorValues:
       pass
       ## Check if some error ocurred Create Error Object

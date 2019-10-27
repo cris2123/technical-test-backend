@@ -1,8 +1,8 @@
 
-from . import base
+from models.base import BaseModel
 import peewee as pw
 
-class Note(base.BaseModel):
+class Note(BaseModel):
 
   title = pw.CharField()
   content = pw.CharField()

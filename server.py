@@ -11,9 +11,12 @@ from datetime import date, datetime
 ### My own modules
 from database.database import sql_database
 from serializers.noteSerializer import NoteSchema
+from serializers.linkSerializer import LinkSchema
 from models.note import Note
+from models.links import Links
 from utils.helpers import addSerializerParameters, getResourcePath
 from utils.querycomposer import QueryComposer
+
 
 
 @hook('before_request')
@@ -28,12 +31,88 @@ def db_close():
 
     return response
 
+
+def mergeJson(jsonA, jsonB):
+
+  jsonMerged = {**json.loads(jsonA.data), **json.loads(jsonB.data), }
+  print(jsonMerged)
+  asString = json.dumps(jsonMerged)
+  print(asString)
+
+  return asString
+
+
+def _getPagination(request, recordNumber):
+
+  parameter = request.query.decode()
+
+  completeURL = str(request.url)
+  completeURL = completeURL.replace("%2C", ',')
+  
+  currentURL = ""
+  previousURL = ""
+  forwardURL = ""
+
+  print(recordNumber)
+
+  if not parameter.get('pagesize',False):
+
+    if not (recordNumber < 5):
+
+      forwardURL = completeURL + "&pagesize=5" + "&continuetoken=2"
+
+  else:
+
+    pagesize = int(parameter.get('pagesize'))
+    currentURL = completeURL
+
+    if not parameter.get('continuetoken',False):
+  
+      if not (recordNumber < pagesize):
+        forwardURL = completeURL + "&continuetoken=2"
+
+    else:
+      
+      tokenValue = int(parameter.get('continuetoken',False))
+
+      previous = tokenValue -1
+      forward = tokenValue + 1
+
+      if previous > 0:
+        previousURL = completeURL.replace("continuetoken="+ str(tokenValue), "continuetoken=" + str(previous))
+
+      if not (recordNumber < pagesize):
+        print("Entre aqui")
+        print("continuetoken=" + str(forward))
+        
+        forwardURL = completeURL.replace("continuetoken="+ str(tokenValue),"continuetoken=" + str(forward))
+
+  requestPagination = Links(current=completeURL,previous=previousURL,following=forwardURL)
+
+  showValues = []
+
+  if forwardURL:
+    showValues.append('following')
+
+  if previousURL:
+    showValues.append('previous')
+
+  showValues.append('current')
+
+  schema = LinkSchema()
+  schema.only = tuple(showValues)
+  jsonLinks = schema.dumps(requestPagination)
+
+  print(jsonLinks.data)
+
+  return jsonLinks.data
+  
 @get('/api/v1/notes')
 @get('/api/v1/notes/<id:int>')
 def get_all_notes(id=None):
 
   response.headers['Content-Type'] = 'application/json'
-  
+
   ## TODO : Check documentation to find another way, maybe use keys instead of len
   if len(request.query) > 0:
     
@@ -44,25 +123,36 @@ def get_all_notes(id=None):
     schema = NoteSchema(many=True)
 
     notes = Note()
+
     if queries.get('selection',False):
       notes = Note.select(*queries['selection'][0])
-      
       showOnSerializer = addSerializerParameters(queries['selection'][1], 'links')
-      
       schema.only = showOnSerializer
-      #schema.only = queries['selection'][1] + ['links']
 
     else:
       notes = notes.select()
 
     if queries.get('sort', False):
       notes = notes.order_by(*queries['sort'])
+    else:
+      notes = notes.order_by(Note.id)
+
+    notes = notes.paginate(queries['pagination'][0],queries['pagination'][1])
 
     if queries.get('search',False):
       notes = notes.where(queries['search'])
     
     # schema = NoteSchema(many=True)
+    searchCount = notes.count()
 
+    links = Links()
+    links.setLinks(request,searchCount)
+
+    lschema = LinkSchema()
+    lschema.only = links._getVisibleFields()
+    jsonLinks = lschema.dumps(links)
+
+    
   else:
     notes = Note.get(Note.id == id)
 
@@ -70,7 +160,9 @@ def get_all_notes(id=None):
 
   jsonNotes = schema.dumps(notes, {"requestData": "/api/v1/notes/id"})
 
-  return jsonNotes.data
+  jsonComplete = mergeJson(jsonLinks,jsonNotes)
+  return jsonComplete
+  #return jsonNotes.data
 
 @post('/api/v1/notes')
 def post_note():
