@@ -484,7 +484,12 @@ def load_data(db_handler):
 if __name__ == "__main__":
   
   print("Removing database")
-  os.remove('notes.db')
+
+  try:
+    os.remove('notes.db')
+
+  except Exception as e:
+    pass
 
   set_initial_data(sql_database, [Note,User])
   
