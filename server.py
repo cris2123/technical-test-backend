@@ -101,21 +101,26 @@ def get_all_notes(id=None):
 
       searchCount = notes.count()
 
+      # TDO : Refactor this section, maybe put link generation on Links class
       links = Links()
       links.setLinks(request,searchCount)
       lschema = LinkSchema()
       lschema.only = links._getVisibleFields()
       jsonLinks = lschema.dumps(links)
+
+      jsonNotes = schema.dumps(notes)
+      jsonComplete = mergeJson(jsonLinks, jsonNotes)
+
+      return jsonComplete
  
     else:
 
       notes = Note.get(Note.id == id)
       schema = NoteSchema()
 
-    jsonNotes = schema.dumps(notes, {"requestData": "/api/v1/notes/id"})
+      jsonNotes = schema.dumps(notes)
 
-    jsonComplete = mergeJson(jsonLinks,jsonNotes)
-    return jsonComplete
+      return jsonNotes.data
     #return jsonNotes.data
 
 

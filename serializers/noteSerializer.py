@@ -42,10 +42,5 @@ class NoteSchema(Schema):
 
   @post_dump(pass_many=True)
   def create_envelope(self, data, many, **kwargs):
-    # print(data)
-    # print("Printing kwargs")
-    # print(**kwargs)
-
-    print(many)
-    print(kwargs)
+    
     return({'data': data})

@@ -48,7 +48,7 @@ class QueryComposer(metaclass=Singleton):
 
   @staticmethod
   def _getFieldValues(attributes, fields):
-    """ Fields is a list of fields separeted by ,
+    """ Fields is a list of fields separeted by ','
         use to pick which columns to show
     """
 
