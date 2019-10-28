@@ -6,7 +6,7 @@ class ErrorSchema(Schema):
   source = fields.Str()
   detail = fields.Str()
 
-  @post_dump(pass_many=True)
-  def create_error(self, data, many, **kwargs):
+  @post_dump()
+  def create_error(self, data, **kwargs):
     """ Function to wrap my error objects """
     return({'error': data})

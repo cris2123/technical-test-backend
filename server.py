@@ -6,23 +6,26 @@ import json
 import operator
 import bcrypt
 
-
 from bottle import get, post, run, static_file, route, template, hook, request, response, abort
 from datetime import date, datetime , timedelta
 
-### My own modules
+### TDO: Refactor inits to import by package 
 from database.database import sql_database
 from serializers.noteSerializer import NoteSchema
 from serializers.linkSerializer import LinkSchema
 from serializers.userSerializer import UserSchema
+from serializers.errorSerializer import ErrorSchema
 from models.note import Note
 from models.links import Links
 from models.user import User
-from utils.helpers import addSerializerParameters, getResourcePath
+from models.error import ErrorObject, computeErrorObject
+from utils.helpers import addSerializerParameters, getResourcePath, mergeJson
 from utils.querycomposer import QueryComposer
 
 import jwt
 
+
+## Global Variables
 JWT_SECRET = 'secret'
 JWT_ALGORITHM = 'HS256'
 JWT_EXP_DELTA_SECONDS = 3600
@@ -30,18 +33,14 @@ JWT_EXP_DELTA_SECONDS = 3600
 @hook('before_request')
 def db_connect():
     sql_database.connect()
-    response.headers['Access-Control-Allow-Origin'] = '*'
-    response.headers['Access-Control-Allow-Methods'] = \
-      'GET, POST, PUT, OPTIONS'
-    response.headers['Access-Control-Allow-Headers'] = \
-            'Origin, Accept, Content-Type, X-Requested-With, X-CSRF-Token, Authorization'
 
 
 @hook('after_request')
-def db_close():
+def cleaning_request():
     if not sql_database.is_closed():
       sql_database.close()
 
+    ## Set header for CORS request
     response.headers['Access-Control-Allow-Origin'] = '*'
     response.headers['Access-Control-Allow-Methods'] = \
         'GET, POST, PUT, OPTIONS'
@@ -51,96 +50,19 @@ def db_close():
     return response
 
 
-def mergeJson(jsonA, jsonB):
-
-  jsonMerged = {**json.loads(jsonA.data), **json.loads(jsonB.data), }
-  print(jsonMerged)
-  asString = json.dumps(jsonMerged)
-  print(asString)
-
-  return asString
-
-
-def _getPagination(request, recordNumber):
-
-  parameter = request.query.decode()
-
-  completeURL = str(request.url)
-  completeURL = completeURL.replace("%2C", ',')
-  
-  currentURL = ""
-  previousURL = ""
-  forwardURL = ""
-
-  print(recordNumber)
-
-  if not parameter.get('pagesize',False):
-
-    if not (recordNumber < 5):
-
-      forwardURL = completeURL + "&pagesize=5" + "&continuetoken=2"
-
-  else:
-
-    pagesize = int(parameter.get('pagesize'))
-    currentURL = completeURL
-
-    if not parameter.get('continuetoken',False):
-  
-      if not (recordNumber < pagesize):
-        forwardURL = completeURL + "&continuetoken=2"
-
-    else:
-      
-      tokenValue = int(parameter.get('continuetoken',False))
-
-      previous = tokenValue -1
-      forward = tokenValue + 1
-
-      if previous > 0:
-        previousURL = completeURL.replace("continuetoken="+ str(tokenValue), "continuetoken=" + str(previous))
-
-      if not (recordNumber < pagesize):
-        print("Entre aqui")
-        print("continuetoken=" + str(forward))
-        
-        forwardURL = completeURL.replace("continuetoken="+ str(tokenValue),"continuetoken=" + str(forward))
-
-  requestPagination = Links(current=completeURL,previous=previousURL,following=forwardURL)
-
-  showValues = []
-
-  if forwardURL:
-    showValues.append('following')
-
-  if previousURL:
-    showValues.append('previous')
-
-  showValues.append('current')
-
-  schema = LinkSchema()
-  schema.only = tuple(showValues)
-  jsonLinks = schema.dumps(requestPagination)
-
-  print(jsonLinks.data)
-
-  return jsonLinks.data
-  
 @route('/api/v1/notes', method=["OPTIONS","GET"])
 @route('/api/v1/notes/<id:int>')
 def get_all_notes(id=None):
 
   response.headers['Content-Type'] = 'application/json'
   if request.method == "OPTIONS":
-
-    return 
+    return response
 
   else:
-    print("TODO EL REQUEST")
-    print(request.headers.get('Authorization'))
-    ## TODO : Check documentation to find another way, maybe use keys instead of len
+    
     queries = ""
 
+    ## TODO : Check documentation to find another way, maybe use keys instead of len
     if len(request.query) > 0:
       queries = QueryComposer.computeRequestQueries(Note,request.query.decode())
 
@@ -181,7 +103,6 @@ def get_all_notes(id=None):
 
       links = Links()
       links.setLinks(request,searchCount)
-
       lschema = LinkSchema()
       lschema.only = links._getVisibleFields()
       jsonLinks = lschema.dumps(links)
@@ -189,7 +110,6 @@ def get_all_notes(id=None):
     else:
 
       notes = Note.get(Note.id == id)
-
       schema = NoteSchema()
 
     jsonNotes = schema.dumps(notes, {"requestData": "/api/v1/notes/id"})
@@ -208,14 +128,28 @@ def post_note():
   else:
 
     response.headers['Content-Type'] = 'application/json'
-
     requestData = request.json
     
     schema = NoteSchema()
     noteObject = schema.load(requestData).data
 
-    noteObject.save()
+    # Update notes in database
+    try:
+      noteObject.save()
+    
+    except pw.IntegrityError:
 
+      errorDict = {
+        'status': 400,
+        'detail': 'All note field are required',
+        'title': 'Bad data',
+        'source': getResourcePath(request.urlparts[:3])
+      }
+
+      response.status = 400
+      return computeErrorObject(errorDict)
+
+    # Return created note
     jsonNotes = schema.dumps(noteObject)
     response.headers['Content-Type'] = 'application/json'
 
@@ -230,7 +164,6 @@ def post_notes():
 
   noteObjects = schema.load(requesData).data
 
-  ## TDO : Fix problem with objects not getting bulk create method
   with sql_database.atomic():
     Note.bulk_create(noteObjects)
 
@@ -242,7 +175,22 @@ def post_notes():
 @post('/api/v1/register')
 def registerUser():
 
-  userParams = request.json
+  try:
+
+    userParams = request.json
+
+  except Exception as e:
+
+    errorDict = {
+        'status': 400,
+        'detail': 'There is not request payload. %s' %(e),
+        'title': 'Not data',
+        'source': getResourcePath(request.urlparts[:3])
+    }
+
+    response.status = 400
+    return computeErrorObject(errorDict)
+
   if userParams:
 
     password = userParams.get('password', False)
@@ -250,8 +198,15 @@ def registerUser():
     name = userParams.get('name',False)
 
     if not password or not email or not name:
+
+      errorDict = {
+          'status': 400,
+          'detail': 'To authenticate you need email and password',
+          'title': 'Not data',
+          'source': getResourcePath(request.urlparts[:3])
+      }
       response.status = 400
-      return
+      return computeErrorObject(errorDict)
 
     else:
       
@@ -262,14 +217,22 @@ def registerUser():
 
       if userCount > 0:
 
-        response.status = 402
-        return 
+        errorDict = {
+            'status': 400,
+            'detail': 'User already exist on database',
+            'title': 'Existing user',
+            'source': getResourcePath(request.urlparts[:3])
+        }
+
+        response.status = 400
+        return computeErrorObject(errorDict)
 
       else:
 
         User(name=name,email=email,password=hashed).save()
         response.status = 201
-        return 
+        return {"response": "User created sucesfully"}
+
 
 @route('/api/v1/login', method=["POST","OPTIONS"])
 def log_user():
@@ -278,33 +241,57 @@ def log_user():
      return response
   else:
 
-    userData = request.json
+    try:
+      userData = request.json
+    except Exception as e:
+
+      errorDict = {
+          'status': 400,
+          'detail': 'There is not request payload',
+          'title': 'Not data',
+          'source': getResourcePath(request.urlparts[:3])
+      }
+
+      response.status = 400
+      return computeErrorObject(errorDict)
 
     email = userData.get('email',False)
     password = userData.get('password',False)
 
     if not email or not password:
-      
-      response.status = 400
-      
 
+      errorDict = {
+          'status': 400,
+          'detail': 'To authenticate you need email and password',
+          'title': 'Incomplete Data',
+          'source': getResourcePath(request.urlparts[:3])
+      }
+      response.status = 400
+      return computeErrorObject(errorDict)
+      
     else:
 
       try:
         query = (User.select().where(User.email == email))
         user = query.get()
 
-
       except pw.DoesNotExist:
         
-        response.status = 400
-        return
+        errorDict = {
+            'status': 404,
+            'detail': 'User not found in database',
+            'title': 'User not found',
+            'source': getResourcePath(request.urlparts[:3])
+        }
+        response.status = 404
+        return computeErrorObject(errorDict)
 
       if user:
-        password = password.encode('utf-8')
-        if bcrypt.checkpw(password, user.password):
 
-          print("I dit it the user is authenticated")
+        password = password.encode('utf-8')
+
+        # Validate password with hash
+        if bcrypt.checkpw(password, user.password):
 
           exp = datetime.utcnow() + timedelta(seconds=JWT_EXP_DELTA_SECONDS)
           payload = {
@@ -312,39 +299,45 @@ def log_user():
             'exp': exp
           }
 
+
+          # Setting jwt token
           jwtToken = jwt.encode(payload, JWT_SECRET, JWT_ALGORITHM)
 
           if jwtToken:
+
             user.update({'tokenExpiration': exp , 'activeToken': True }).execute()
           
-            response.status = 200
             response.body = json.dumps({'token': jwtToken.decode('utf-8')})
+            response.status = 200
             return response
 
           else:
 
-            response.status = 403
-            return {'error': "Error generating active token"}
+            errorDict = {
+                'status': 500,
+                'detail': 'Error Generating JWT token',
+                'title': 'Error Token Generation',
+                'source': getResourcePath(request.urlparts[:3])
+            }
+
+            response.status = 500
+            return computeErrorObject(errorDict)
 
         else:
 
-          response.status = 404
-          print("Invalid credentials")
-          return
-
-      else :
-        response.status = 400
-        return {"error": "Not valid user"}
-
-
+          errorDict = {
+              'status': 403,
+              'detail': 'User not found in database',
+              'title': 'User not found',
+              'source': getResourcePath(request.urlparts[:3])
+          }
+          response.status = 403
+          return computeErrorObject(errorDict)
 
 @get('/api/v1/users')
 def get_all_users():
 
-  print(request.headers.get("Authorization"))
-  
   users = User.select()
-
   userSchema = UserSchema(many=True)
   jsonUser = userSchema.dumps(User)
 
@@ -358,47 +351,71 @@ def getToken(request):
   
 
 def auth_required(fn):
-  print("estoy entrando en la funcion decorador")
-  def decorated(*args, **kwargs):
+  
+  def jwtValidation(*args, **kwargs):
 
     jwtToken = getToken(request)
-
     if jwtToken:
 
+      #Remove Bearer string part "Beares <token>"
       headerParts = jwtToken.split()
 
       try:
         token = jwt.decode(headerParts[1], JWT_SECRET)
+        request['user_id'] = token['user_id']
       except jwt.ExpiredSignature:
-        abort(401, {'code': 'token_expired',
-                    'description': 'token is expired'})
+        errorDict = {
+          'status': 401, 
+          'detail': 'JWT token expired',
+          'title': 'token Expiration',
+          'source': getResourcePath(request.urlparts[:3])
+        }
+        return computeErrorObject(errorDict)
+
       except jwt.DecodeError:
-        abort(401, {'code': 'token_invalid', 'description': "Some message "})
+
+        errorDict = {
+            'status': 401,
+            'detail': 'Invalid Token',
+            'title': 'Your token is not valid',
+            'source': getResourcePath(request.urlparts[:3])
+        }
+
+        return computeErrorObject(errorDict)
+        # abort(401, {'code': 'token_invalid', 'description': "Some message "})
 
     else:
-      abort(403, {'code': "Not token find on header"})
-    print("Previo a entrar en la funcion real")
+
+      errorDict = {
+            'status': 403,
+            'detail': 'Not authenticated',
+            'title': 'There is no token on request header',
+            'source': getResourcePath(request.urlparts[:3])
+      }
+      return computeErrorObject(errorDict)
+      # abort(403, {'code': "Not token find on header"})
+    
     return fn(*args, **kwargs)
 
-  return decorated
+  return jwtValidation
 
 
 @get("/api/v1/profile")
 @auth_required
 def get_profile():
 
-  usertoken = getToken(request)
-  if usertoken:
+  """ Get current user profile"""
 
-    parts = usertoken.split()
-    jwtT = jwt.decode(parts[1],JWT_SECRET)
+  if request['user_id']:
 
-    print(jwtT)
-    uid = jwtT['user_id']
-    print(uid)
+    user = User.select().where(User.id == request['user_id']).get()
+    uSchema = UserSchema()
+    jsonUser = uSchema.dumps(user)
+
+    del request['user_id']
+    return jsonUser.data
 
   return
-
 
 
 # Start your code here, good luck (: ...

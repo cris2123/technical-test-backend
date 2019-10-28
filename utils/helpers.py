@@ -1,3 +1,4 @@
+import json
 
 def addSerializerParameters(systemValues, extraParameters, resourceSchema=None):
 
@@ -16,4 +17,13 @@ def getResourcePath(urlparts):
 def getCompleteApiCall(url):
 
   return url.replace("%2C",',')
+
+def mergeJson(jsonA, jsonB):
+
+  jsonMerged = {**json.loads(jsonA.data), **json.loads(jsonB.data), }
+  print(jsonMerged)
+  asString = json.dumps(jsonMerged)
+  print(asString)
+
+  return asString
   

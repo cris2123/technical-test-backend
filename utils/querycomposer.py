@@ -49,7 +49,7 @@ class QueryComposer(metaclass=Singleton):
   @staticmethod
   def _getFieldValues(attributes, fields):
     """ Fields is a list of fields separeted by ,
-        use to fill selection values
+        use to pick which columns to show
     """
 
     selectionFields = fields.split(',')
@@ -93,7 +93,7 @@ class QueryComposer(metaclass=Singleton):
 
   @staticmethod
   def _filterResourceFields(resourceFields, Resource):
-    """ Return list of tuples with querystring parameters which are defined in ou resource
+    """ Return list of tuples with querystring parameters which are defined in  resource table
         
         input : Resource object 
         input : [(parameter, value), ......]
@@ -119,9 +119,10 @@ class QueryComposer(metaclass=Singleton):
     fieldCount = 0
     sortCount = 0
 
-    ## TODO search is are more than 2 fields
+    ## TODO search with ranges
     for fields in resourceFields:
 
+      
       if fields[0] == "fields":
         fieldCount += 1
 
@@ -197,62 +198,6 @@ class QueryComposer(metaclass=Singleton):
 
     return (pagination, invalidFields)
 
-  
-
-    # invalidFields = []
-
-    # for field in resourceFields:
-
-    #   if field[0] == "pagesize":
-    #     pageCount +=1
-    #     if pageCount < 2:
-    #       size = int(field[1])
-    #     else:
-    #       invalidFields.append((field[0],"Is repeated multiple times in request"))
-
-    #   if field[0] == "continuetoken":
-    #     continueTokenCount +=1
-
-    #     if continueTokenCount <2:
-    #       continuetoken = int(field[1])
-    #       if continuetoken > 1:
-    #         previous = continueTokenCount-1
-    #       else:
-    #         previous = 0
-          
-    #       forward = continuetoken+1
-
-    # if continueTokenCount == 0:
-
-    #   continuetoken = 1
-    #   forward = continuetoken+1
-    #   previous = 0
-
-    # tokenValue = request.query.decode().get('continuetoken')
-
-    # ## All URLS
-    # if tokenValue:
-
-    #   currentURL = getCompleteApiCall(request.url)
-
-    #   if previous != 0:
-    #     value = request.query.decode()['continuetoken']
-    #     previousURL = getCompleteApiCall(request.url).replace('continuetoken='+ value ,'continuetoken='+ str(previous))
-
-
-    #   value = request.query.decode()['continuetoken']
-    #   nextURL = getCompleteApiCall(request.url).replace('continuetoken=' + value, 'continuetoken='+ str())
-
-    # else:
-    #   pass
-
-
-
-
-    # return link
-
-    
-
   @staticmethod
   def _prepareQueryParameters(queryParameters, Resource):
     """ Returns a tuple with  a list of queryString variables and values for the system (pagination, metadata, etc)
@@ -305,9 +250,6 @@ class QueryComposer(metaclass=Singleton):
 
     sortExpression = []
 
-    print("Printing sort fields")
-    print(sortExpression)
-
     for operator, attribute in sortValues:
       if operator == "+":
         sortExpression.append(getattr(Resource, attribute).asc())
@@ -352,7 +294,7 @@ class QueryComposer(metaclass=Singleton):
 
     #####TODO: Implement maybe paginationClass to get this data
     if systemValues:
-      print("Entre aqui en system values")
+      
       expressionData["pagination"] = (systemValues['page'], systemValues['pagesize'])
       
     if errorValues:
