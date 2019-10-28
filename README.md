@@ -163,7 +163,10 @@ el archivo main.html tambien usado para el front-end despues de ingresar en el l
   * Se debe generar logica para desloguear al usuario del sistema.
 
 
+# Notas
 
+* Fue necesario actualizar la libreria de `marshmallow y peewee` en el requirements debido a que la version que se encontraba en 
+el repositorio original no tenias algunos de los metodos utilizados en este proyecto.
 
 
 
