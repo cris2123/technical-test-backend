@@ -47,7 +47,7 @@ el archivo main.html tambien usado para el front-end despues de ingresar en el l
 
   Para probar esta sección se uso la libreria de httpie agregada al requirements.txt
 
-  Algunas consultas utilizadas se presentan a continuaciónÑ
+  Algunas consultas utilizadas se presentan a continuación:
 
   `http GET :8000/api/v1/notes active==False sort==-created_at pagesize==3`
   `http GET :8000/api/v1/notes sort==-created_at pagesize==3 continuetoken==2`
