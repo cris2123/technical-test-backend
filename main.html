@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang='en'>
+
+<head>
+  <meta charset='UTF-8' />
+  <title>Aimo Note API Interface</title>
+  <link rel='stylesheet' href='/static/css/style.css' />
+</head>
+
+<body>
+  <header class='main-form-header'>
+    <h1>Get User Data</h1>
+    <p><em>Create and Read your notes</em></p>
+  </header>
+
+  <section class="page-layout">
+
+    <div class="content-block">
+      <button id="read-notes">Get Your Notes</button>
+      <pre class="data-content" id="note-read-content"></pre>
+    </div>
+    
+    <div class="content-block">
+      <button id="write-notes">Write a note</button>
+      <pre contenteditable="True" class="data-content" id="note-write-content">
+{
+  "active": "True",
+  "title": "Probando la creacion de la nota",
+  "content": "Lorem ipsum y los numeros de la muerte",
+  "edited_at": "2019-10-27",
+  "created_by": "Cris",
+  "created_at": "2019-10-27"
+}
+      </pre>
+    </div>
+
+  </section>
+  
+  <script src="/static/js/interface.js"></script>
+</body>
+
+</html>

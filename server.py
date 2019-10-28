@@ -30,12 +30,23 @@ JWT_EXP_DELTA_SECONDS = 3600
 @hook('before_request')
 def db_connect():
     sql_database.connect()
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Methods'] = \
+      'GET, POST, PUT, OPTIONS'
+    response.headers['Access-Control-Allow-Headers'] = \
+            'Origin, Accept, Content-Type, X-Requested-With, X-CSRF-Token, Authorization'
 
 
 @hook('after_request')
 def db_close():
     if not sql_database.is_closed():
       sql_database.close()
+
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Methods'] = \
+        'GET, POST, PUT, OPTIONS'
+    response.headers['Access-Control-Allow-Headers'] = \
+        'Origin, Accept, Content-Type, X-Requested-With, X-CSRF-Token, Authorization'
 
     return response
 
@@ -115,78 +126,100 @@ def _getPagination(request, recordNumber):
 
   return jsonLinks.data
   
-@get('/api/v1/notes')
-@get('/api/v1/notes/<id:int>')
+@route('/api/v1/notes', method=["OPTIONS","GET"])
+@route('/api/v1/notes/<id:int>')
 def get_all_notes(id=None):
 
   response.headers['Content-Type'] = 'application/json'
+  if request.method == "OPTIONS":
 
-  ## TODO : Check documentation to find another way, maybe use keys instead of len
-  if len(request.query) > 0:
-    
-    queries = QueryComposer.computeRequestQueries(Note,request.query.decode())
+    return 
 
-  if not id:
-
-    schema = NoteSchema(many=True)
-
-    notes = Note()
-
-    if queries.get('selection',False):
-      notes = Note.select(*queries['selection'][0])
-      showOnSerializer = addSerializerParameters(queries['selection'][1], 'links')
-      schema.only = showOnSerializer
-
-    else:
-      notes = notes.select()
-
-    if queries.get('sort', False):
-      notes = notes.order_by(*queries['sort'])
-    else:
-      notes = notes.order_by(Note.id)
-
-    notes = notes.paginate(queries['pagination'][0],queries['pagination'][1])
-
-    if queries.get('search',False):
-      notes = notes.where(queries['search'])
-    
-    # schema = NoteSchema(many=True)
-    searchCount = notes.count()
-
-    links = Links()
-    links.setLinks(request,searchCount)
-
-    lschema = LinkSchema()
-    lschema.only = links._getVisibleFields()
-    jsonLinks = lschema.dumps(links)
-
-    
   else:
-    notes = Note.get(Note.id == id)
+    print("TODO EL REQUEST")
+    print(request.headers.get('Authorization'))
+    ## TODO : Check documentation to find another way, maybe use keys instead of len
+    queries = ""
 
-    schema = NoteSchema()
+    if len(request.query) > 0:
+      queries = QueryComposer.computeRequestQueries(Note,request.query.decode())
 
-  jsonNotes = schema.dumps(notes, {"requestData": "/api/v1/notes/id"})
+    if not id:
 
-  jsonComplete = mergeJson(jsonLinks,jsonNotes)
-  return jsonComplete
-  #return jsonNotes.data
+      schema = NoteSchema(many=True)
 
-@post('/api/v1/notes')
+      if queries:
+
+        notes = Note()
+
+        if queries.get('selection',False):
+          notes = Note.select(*queries['selection'][0])
+          showOnSerializer = addSerializerParameters(queries['selection'][1], 'links')
+          schema.only = showOnSerializer
+
+        else:
+          notes = notes.select()
+
+        if queries.get('sort', False):
+          notes = notes.order_by(*queries['sort'])
+        else:
+          notes = notes.order_by(Note.id)
+
+        notes = notes.paginate(queries['pagination'][0],queries['pagination'][1])
+
+        if queries.get('search',False):
+          notes = notes.where(queries['search'])
+        
+        # schema = NoteSchema(many=True)
+
+      else:
+
+        notes = Note.select()
+        #notes = notes.paginate(1,5)
+
+      searchCount = notes.count()
+
+      links = Links()
+      links.setLinks(request,searchCount)
+
+      lschema = LinkSchema()
+      lschema.only = links._getVisibleFields()
+      jsonLinks = lschema.dumps(links)
+ 
+    else:
+
+      notes = Note.get(Note.id == id)
+
+      schema = NoteSchema()
+
+    jsonNotes = schema.dumps(notes, {"requestData": "/api/v1/notes/id"})
+
+    jsonComplete = mergeJson(jsonLinks,jsonNotes)
+    return jsonComplete
+    #return jsonNotes.data
+
+
+@route('/api/v1/notes', method=["POST","OPTIONS"])
 def post_note():
 
-  requestData = request.json
-  print(requestData)
+  if request.method == "OPTIONS":
+    return
 
-  schema = NoteSchema()
-  noteObject = schema.load(requestData).data
+  else:
 
-  noteObject.save()
+    response.headers['Content-Type'] = 'application/json'
 
-  jsonNotes = schema.dumps(noteObject)
-  response.headers['Content-Type'] = 'application/json'
+    requestData = request.json
+    
+    schema = NoteSchema()
+    noteObject = schema.load(requestData).data
 
-  return jsonNotes.data
+    noteObject.save()
+
+    jsonNotes = schema.dumps(noteObject)
+    response.headers['Content-Type'] = 'application/json'
+
+    return jsonNotes.data
 
 @post('/api/v1/notes/batchnotes')
 def post_notes():
@@ -238,65 +271,70 @@ def registerUser():
         response.status = 201
         return 
 
-@post('/api/v1/login')
+@route('/api/v1/login', method=["POST","OPTIONS"])
 def log_user():
 
-  userData = request.json
-
-  email = userData.get('email',False)
-  password = userData.get('password',False)
-
-  if not email or not password:
-
-    response.status = 400
-    ### maybe un raise ValueError
-
+  if request.method == "OPTIONS":
+     return response
   else:
 
-    try:
-      query = (User.select().where(User.email == email))
-      user = query.get()
+    userData = request.json
 
+    email = userData.get('email',False)
+    password = userData.get('password',False)
 
-    except pw.DoesNotExist:
+    if not email or not password:
       
       response.status = 400
-      return
+      
 
-    if user:
-      password = password.encode('utf-8')
-      if bcrypt.checkpw(password, user.password):
+    else:
 
-        print("I dit it the user is authenticated")
+      try:
+        query = (User.select().where(User.email == email))
+        user = query.get()
 
-        exp = datetime.utcnow() + timedelta(seconds=JWT_EXP_DELTA_SECONDS)
-        payload = {
-          'user_id': user.id,
-          'exp': exp
-        }
 
-        jwtToken = jwt.encode(payload, JWT_SECRET, JWT_ALGORITHM)
-
-        if jwtToken:
-          user.update({'tokenExpiration': exp , 'activeToken': True }).execute()
+      except pw.DoesNotExist:
         
-          response.status = 200
-          return {'token': jwtToken.decode('utf-8')}
+        response.status = 400
+        return
+
+      if user:
+        password = password.encode('utf-8')
+        if bcrypt.checkpw(password, user.password):
+
+          print("I dit it the user is authenticated")
+
+          exp = datetime.utcnow() + timedelta(seconds=JWT_EXP_DELTA_SECONDS)
+          payload = {
+            'user_id': user.id,
+            'exp': exp
+          }
+
+          jwtToken = jwt.encode(payload, JWT_SECRET, JWT_ALGORITHM)
+
+          if jwtToken:
+            user.update({'tokenExpiration': exp , 'activeToken': True }).execute()
+          
+            response.status = 200
+            response.body = json.dumps({'token': jwtToken.decode('utf-8')})
+            return response
+
+          else:
+
+            response.status = 403
+            return {'error': "Error generating active token"}
 
         else:
 
-          response.status = 403
-          return {'error': "Error generating active token"}
+          response.status = 404
+          print("Invalid credentials")
+          return
 
-      else:
-
-        response.status = 404
-        print("Invalid credentials")
-        return
-
-    else :
-      response.status = 400
-      return {"error": "Not valid user"}
+      else :
+        response.status = 400
+        return {"error": "Not valid user"}
 
 
 

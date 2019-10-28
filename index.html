@@ -1,16 +1,34 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang='en'>
+
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="X-UA-Compatible" content="ie=edge">
-  <title>Document</title>
+  <meta charset='UTF-8' />
+  <title>Aimo Note API Interface</title>
+  <link rel='stylesheet' href='./static/css/style.css' />
 </head>
+
 <body>
+  <header class='login-form-header'>
+    <h1>Aimo Note API Interface</h1>
+    <p><em>Interface of note api create and read notes</em></p>
+  </header>
+  <form action='http://localhost:8000/api/v1/login' method='post' class='login-form'>
 
-  <p>Prueba de que el html funciona</p>
-  
+    <div class='form-row'>
+      <label for='email'>Email</label>
+      <input id='email' name='email' type='email'
+        placeholder='jonhDoe@example.com' required />
+    </div>
+
+    <div class='form-row'>
+      <label for='password'>Pasword</label>
+      <input id='password' name='password' type='text' required />
+    </div>
+    <div class='form-row'>
+      <button id="submit">Submit</button>
+    </div>
+  </form>
+  <script src="/static/js/login.js"></script>
 </body>
-</html>
 
-<!-- You can use any js library (: -->
+</html>

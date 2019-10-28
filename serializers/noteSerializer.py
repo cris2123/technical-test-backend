@@ -32,9 +32,12 @@ class NoteSchema(Schema):
 
   @pre_dump(pass_many=True)
   def addLink(self, data, many, **kwargs):
-    print(data)
-    for record in data:
-      record.setLink(getResourcePath(request.urlparts[:3]), str(record.id))
+    if  isinstance(data,type([])):
+      for record in data:
+        record.setLink(getResourcePath(request.urlparts[:3]), str(record.id))
+    else:
+      data.setLink(getResourcePath(request.urlparts[:3]), str(data.id))
+
     return data
 
   @post_dump(pass_many=True)
